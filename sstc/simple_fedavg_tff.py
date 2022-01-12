@@ -1,29 +1,20 @@
-# Copyright 2020, The TensorFlow Federated Authors.
-#
-# Licensed under the Apache License, Version 2.0 (the "License");
-# you may not use this file except in compliance with the License.
-# You may obtain a copy of the License at
-#
-#      http://www.apache.org/licenses/LICENSE-2.0
-#
-# Unless required by applicable law or agreed to in writing, software
-# distributed under the License is distributed on an "AS IS" BASIS,
-# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-# See the License for the specific language governing permissions and
-# limitations under the License.
-"""An implementation of the Federated Averaging algorithm.
+"""An implementation of the Federated Averaging algorithm +
+STC or SSTC of updates.
 
-This is intended to be a minimal stand-alone implementation of Federated
-Averaging, suitable for branching as a starting point for algorithm
-modifications; see `tff.learning.build_federated_averaging_process` for a
-more full-featured implementation.
-
-Based on the paper:
+Based on the papers:
 
 Communication-Efficient Learning of Deep Networks from Decentralized Data
     H. Brendan McMahan, Eider Moore, Daniel Ramage,
     Seth Hampson, Blaise Aguera y Arcas. AISTATS 2017.
     https://arxiv.org/abs/1602.05629
+
+Robust and communication-efficient federated learning from non-iid data
+    Felix Sattler, Simon Wiedemann, Klaus-Robert M¨uller, and Wojciech Samek
+    IEEE transactions on neural networks and learning systems, 2019
+
+Structured Sparse Ternary Compression for Convolutional Layers in Cross-Device Federated Learning
+    Alessio Mora, Luca Foschini, Paolo Bellavista
+    Under review.
 """
 
 import tensorflow as tf

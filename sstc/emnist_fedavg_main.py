@@ -1,20 +1,8 @@
-# Copyright 2020, The TensorFlow Federated Authors.
-#
-# Licensed under the Apache License, Version 2.0 (the "License");
-# you may not use this file except in compliance with the License.
-# You may obtain a copy of the License at
-#
-#      http://www.apache.org/licenses/LICENSE-2.0
-#
-# Unless required by applicable law or agreed to in writing, software
-# distributed under the License is distributed on an "AS IS" BASIS,
-# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-# See the License for the specific language governing permissions and
-# limitations under the License.
-"""Simple FedAvg to train EMNIST.
+"""
+Experiments to compare FedAvg+STC and FedAvg+SSTC
 
 This is intended to be a minimal stand-alone experiment script built on top of
-core TFF.
+core TFF and starting from the simple FedAvg implementation from the TFF repo.
 """
 
 import collections
@@ -24,7 +12,6 @@ from absl import flags
 import numpy as np
 import tensorflow as tf
 import tensorflow_federated as tff
-import random
 
 import simple_fedavg_tf
 import simple_fedavg_tff
@@ -141,6 +128,7 @@ def main(argv):
   if len(argv) > 1:
     raise app.UsageError('Too many command-line arguments.')
 
+  # Preparing the directory to save run results
   root_logdir = os.path.abspath(os.path.join("logs", "SSTC"))
 
   run_id = "C{0}_E{1}_SSTC".format(str(FLAGS.train_clients_per_round),
@@ -159,6 +147,7 @@ def main(argv):
   tff.backends.native.set_local_execution_context(
       server_tf_device=server_device, client_tf_devices=client_devices)
 
+  # Load the dataset
   train_data, test_data = get_emnist_dataset()
 
   def tff_model_fn():
@@ -180,7 +169,7 @@ def main(argv):
   for round_num in range(FLAGS.total_rounds):
     # For fair comparison among algorithms, we select the same pool of per-round participants using a seed
     np.random.seed(seed)
-    seed = seed +1
+    seed = seed + 1
     sampled_clients = np.random.choice(
         train_data.client_ids,
         size=FLAGS.train_clients_per_round,
@@ -192,18 +181,22 @@ def main(argv):
         for client in sampled_clients
     ]
 
+    # Run the next round of the training
     server_state, train_metrics, time_metrics = iterative_process.next(
         server_state, sampled_train_data)
 
     print(f'Round {round_num} training loss: {train_metrics} mean time: {time_metrics}')
     print(" Local Training Average Time {:.7f}".format(time_metrics))
-    #print(type(time_metrics))
+
+    # Evaluating the global model on the test set
     if round_num % FLAGS.rounds_per_eval == 0:
       model.from_weights(server_state.model_weights)
       accuracy = simple_fedavg_tf.keras_evaluate(model.keras_model, test_data,
                                                  metric)
       print(f'Round {round_num} validation accuracy: {accuracy * 100.0}')
 
+    # Writing the results on disk
+    # To be then visualized or post-processed
     with test_summary_writer.as_default():
         tf.summary.scalar("sparse_categorical_accuracy", accuracy, step=round_num)
         test_summary_writer.flush()

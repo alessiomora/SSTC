@@ -1,29 +1,20 @@
-# Copyright 2020, The TensorFlow Federated Authors.
-#
-# Licensed under the Apache License, Version 2.0 (the "License");
-# you may not use this file except in compliance with the License.
-# You may obtain a copy of the License at
-#
-#      http://www.apache.org/licenses/LICENSE-2.0
-#
-# Unless required by applicable law or agreed to in writing, software
-# distributed under the License is distributed on an "AS IS" BASIS,
-# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-# See the License for the specific language governing permissions and
-# limitations under the License.
-"""An implementation of the Federated Averaging algorithm.
+"""An implementation of the Federated Averaging algorithm +
+STC or SSTC of updates.
 
-This is intended to be a minimal stand-alone implementation of Federated
-Averaging, suitable for branching as a starting point for algorithm
-modifications; see `tff.learning.build_federated_averaging_process` for a
-more full-featured implementation.
-
-Based on the paper:
+Based on the papers:
 
 Communication-Efficient Learning of Deep Networks from Decentralized Data
     H. Brendan McMahan, Eider Moore, Daniel Ramage,
     Seth Hampson, Blaise Aguera y Arcas. AISTATS 2017.
     https://arxiv.org/abs/1602.05629
+
+Robust and communication-efficient federated learning from non-iid data
+    Felix Sattler, Simon Wiedemann, Klaus-Robert M¨uller, and Wojciech Samek
+    IEEE transactions on neural networks and learning systems, 2019
+
+Structured Sparse Ternary Compression for Convolutional Layers in Cross-Device Federated Learning
+    Alessio Mora, Luca Foschini, Paolo Bellavista
+    Under review.
 """
 
 import collections
@@ -205,13 +196,6 @@ def client_update(model, dataset, server_message, client_optimizer):
   Returns:
     A 'ClientOutput`.
   """
-    #----- to extract rnd num
-    #seed = tf.random.uniform([1], maxval=1000, dtype=tf.int64)
-    #dim = tf.constant(3, tf.int64)
-    #sampled = tf_function(seed)
-    #tf.print("Seed: ", seed, summarize=-1)
-    #tf.print("Sample without replacement: ", sampled, seed, summarize=-1)
-    #------------------------
 
     def difference_model_norm_2_square(global_model, local_model):
         """
@@ -223,15 +207,6 @@ def client_update(model, dataset, server_message, client_optimizer):
 
         Returns: the squared norm
         """
-        
-        #difference = tf.nest.map_structure(lambda a, b: tf.square(a - b),
-        #                      local_model,
-        #                      global_model)
-
-        #squared_norm = tf.reduce_sum(
-        #    tf.stack([tf.reduce_sum(layer_diff)
-        #               for layer_diff in difference]))
-
         difference = tf.nest.map_structure(lambda a, b: a - b,
                                            local_model,
                                            global_model)
@@ -260,8 +235,8 @@ def client_update(model, dataset, server_message, client_optimizer):
             # fedprox_loss = outputs.loss + prox_term
             #----------------------
 
-        # Letting GradientTape dealing with the FedProx's loss
         grads = tape.gradient(outputs.loss, model_weights.trainable)
+        # If FedProx is decommented, letting GradientTape dealing with the FedProx's loss
         #grads = tape.gradient(fedprox_loss, model_weights.trainable)
 
         client_optimizer.apply_gradients(zip(grads, model_weights.trainable))
@@ -275,59 +250,25 @@ def client_update(model, dataset, server_message, client_optimizer):
                                           model_weights.trainable,
                                           initial_weights.trainable)
     client_weight = tf.cast(num_examples, tf.float32)
-    #tf.print("client_weight ", client_weight)
-    time_client_update = tf.subtract(tf.timestamp(), init_time)
-    
-    # STC
-    #conv_updates = [weights_delta[0], weights_delta[2]] 
-    #fc_updates = [weights_delta[4], weights_delta[6]]
-    #weights_delta[0], weights_delta[2], weights_delta[4], weights_delta[6] = structured_sparse_ternary_compression(conv_updates, fc_updates, 260, 0.01)
-    # This is for original updates
-    # To decide whether to print
-    #to_print_extr = tf.random.uniform(shape=[], minval=0., maxval=10.)
-    
-    #tf.cond(tf.math.logical_and(tf.equal(tf.math.floormod(server_message.round_num+1, 1000), 0), tf.math.less(to_print_extr, 0.6)), true_fn=lambda:tf.print(server_message.round_num, to_print_extr, "\n", tf.reshape(weights_delta[0], [-1]), output_stream="file://training_output/weight_delta_stc.out",
-     #        summarize=-1), false_fn=lambda:tf.no_op()) 
 
-    #tf.cond(tf.math.logical_and(tf.equal(tf.math.floormod(server_message.round_num, 250), 0), tf.math.less(to_print_extr, 0.6)), true_fn=lambda:tf.print(server_message.round_num, to_print_extr, "\n", tf.reshape(tf.gather(weights_delta[2], [0], axis=2), [-1]), "\n", tf.reshape(tf.gather(weights_delta[2], [15], axis=2), [-1]), "\n", tf.reshape(tf.gather(weights_delta[2], [31], axis=2), [-1]), output_stream="file://training_output/weight_delta_stc_conv2.out",
-     #        summarize=-1), false_fn=lambda:tf.no_op()) 
-    
     weight_delta_copy = []
     for ww in weights_delta:
         weight_delta_copy.append(tf.identity(ww))
-        
+
+    # Sparse Ternary Compression (STC) - excluding biases
+    # De-comment this for STC
     #weights_delta_no_bias_flatten = flatten_ad_hoc(weights_delta)
     #stc_updates_no_bias, idx = sparse_ternary_compression(weights_delta_no_bias_flatten, percentage=0.01)
-
     #weights_delta[0], weights_delta[2], weights_delta[4], weights_delta[6] = reshape_ad_hoc(stc_updates_no_bias, weights_delta)
 
-    # Structured STC
-    #weights_delta[0] = change_stc_in_structured_stc(weights_delta[0], idx)
+    # Structured STC - excluding biases
     conv_updates = [weight_delta_copy[0], weight_delta_copy[2]] 
     fc_updates = [weight_delta_copy[4], weight_delta_copy[6]]
-    #weight_delta_copy[0], weight_delta_copy[2], weight_delta_copy[4], weight_delta_copy[6] = structured_sparse_ternary_compression(conv_updates, fc_updates, 260, 0.01)
-    # 106 ==> 5%
-    # 56 ==> 2.5%
-    weights_delta[0], weights_delta[2], weights_delta[4], weights_delta[6] = structured_sparse_ternary_compression(conv_updates, fc_updates, 832, 0.01)
-    
-    #to_be_printed = tf.nest.map_structure(lambda a: tf.strings.as_string(a, precision=20), weights_delta)
-    #tf.print(tf.reshape(weights_delta[2], [-1]), output_stream="file://training_output/weight_delta_stc.out",
-    #         summarize=-1)
-    
-    # This is for STC
-    #tf.cond(tf.math.logical_and(tf.equal(tf.math.floormod(server_message.round_num+1, 1000), 0), tf.math.less(to_print_extr, 0.6)), true_fn=lambda:tf.print(server_message.round_num, to_print_extr, "\n", tf.reshape(weights_delta[0], [-1]), output_stream="file://training_output/weight_delta_stc.out",
-     #       summarize=-1), false_fn=lambda:tf.no_op()) 
-             
-    #tf.cond(tf.math.logical_and(tf.equal(tf.math.floormod(server_message.round_num, 250), 0), tf.math.less(to_print_extr, 0.6)), true_fn=lambda:tf.print(server_message.round_num, to_print_extr, "\n", tf.reshape(tf.gather(weights_delta[2], [0], axis=2), [-1]), "\n", tf.reshape(tf.gather(weights_delta[2], [15], axis=2), [-1]), "\n", tf.reshape(tf.gather(weights_delta[2], [31], axis=2), [-1]), output_stream="file://training_output/weight_delta_stc_conv2.out",
-    #         summarize=-1), false_fn=lambda:tf.no_op()) 
-    # This is for SSTC
-    
-    #tf.cond(tf.math.logical_and(tf.equal(tf.math.floormod(server_message.round_num+1, 1000), 0), tf.math.less(to_print_extr, 0.6)),  true_fn=lambda:tf.print(server_message.round_num, to_print_extr, "\n", tf.reshape(weight_delta_copy[0], [-1]), output_stream="file://training_output/weight_delta_stc.out",
-     #        summarize=-1), false_fn=lambda:tf.no_op()) 
-    #tf.cond(tf.math.logical_and(tf.equal(tf.math.floormod(server_message.round_num, 250), 0), tf.math.less(to_print_extr, 0.6)), true_fn=lambda:tf.print(server_message.round_num, to_print_extr, "\n", tf.reshape(tf.gather(weight_delta_copy[2], [0], axis=2), [-1]), "\n", tf.reshape(tf.gather(weight_delta_copy[2], [15], axis=2), [-1]), "\n", tf.reshape(tf.gather(weight_delta_copy[2], [31], axis=2), [-1]), output_stream="file://training_output/weight_delta_stc_conv2.out",
-     #        summarize=-1), false_fn=lambda:tf.no_op()) 
+    weights_delta[0], weights_delta[2], weights_delta[4], weights_delta[6] = structured_sparse_ternary_compression(conv_updates, fc_updates, 260, 0.01)
 
-    #tf.cond(tf.equal(tf.math.floormod(server_message.round_num, 250), 0), true_fn=lambda:tf.print("Writing to file"), false_fn=lambda:tf.no_op()) 
+    # Just a time metric
+    time_client_update = tf.subtract(tf.timestamp(), init_time)
+
     return ClientOutput(weights_delta, client_weight, loss_sum / client_weight, time_client_update)
 
 """
@@ -366,13 +307,6 @@ def sparse_ternary_compression(weights_delta, percentage):
 
     dW_abs = tf.math.abs(dW)
     values_for_calculating_mu, idx = tf.math.top_k(dW_abs, k=k_int)
-
-    # I need to store --> values_for_calculating_mu, indices
-    #to_be_printed_val = tf.nest.map_structure(lambda a: tf.strings.as_string(a, precision=6), values_for_calculating_mu)
-    #to_be_printed_idx = tf.nest.map_structure(lambda a: tf.strings.as_string(a), idx)
-    #tf.print("[Update]\n", to_be_printed_idx, "\n", to_be_printed_val,  output_stream="file://training_output/weight_delta_001.out",
-    #         summarize=-1)
-    # ------------------------------------------------------
 
     k_float = tf.cast(k_int, dtype=tf.float32)
     mu = tf.math.divide_no_nan(tf.reduce_sum(values_for_calculating_mu), k_float)
