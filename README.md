@@ -22,4 +22,6 @@ Activate your virtual environment and run the following command from the fedavg 
 
 metadata should be in OntoKB
 OTEAPI per produrre/estrarre metadati
+material for the training
 
+venue: Network service management

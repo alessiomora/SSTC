@@ -200,7 +200,8 @@ def client_update(model, dataset, server_message, client_optimizer):
     def difference_model_norm_2_square(global_model, local_model):
         """
         Calculates the squared l2 norm of a model difference (i.e.
-        local_model - global_model)
+        local_model - global_model). This serves if one would like
+        to have FedProx optimization.
         Args:
             global_model: the model broadcast by the server
             local_model: the current, in-training model
@@ -243,7 +244,6 @@ def client_update(model, dataset, server_message, client_optimizer):
 
         batch_size = tf.shape(batch['x'])[0]
         num_examples += batch_size
-        #tf.print("BATCH SIZE ", batch_size)
         loss_sum += outputs.loss * tf.cast(batch_size, tf.float32)
 
     weights_delta = tf.nest.map_structure(lambda a, b: a - b,
@@ -264,45 +264,20 @@ def client_update(model, dataset, server_message, client_optimizer):
     # Structured STC - excluding biases
     conv_updates = [weight_delta_copy[0], weight_delta_copy[2]] 
     fc_updates = [weight_delta_copy[4], weight_delta_copy[6]]
-    weights_delta[0], weights_delta[2], weights_delta[4], weights_delta[6] = structured_sparse_ternary_compression(conv_updates, fc_updates, 260, 0.01)
+    weights_delta[0], weights_delta[2], weights_delta[4], weights_delta[6] = structured_sparse_ternary_compression(conv_updates, fc_updates, n_filters=260, sparsity=0.01)
 
     # Just a time metric
     time_client_update = tf.subtract(tf.timestamp(), init_time)
 
     return ClientOutput(weights_delta, client_weight, loss_sum / client_weight, time_client_update)
 
-"""
-for batch in iter(dataset):
-    with tf.GradientTape() as tape:
-      outputs = model.forward_pass(batch)
-    grads = tape.gradient(outputs.loss, model_weights.trainable)
-    client_optimizer.apply_gradients(zip(grads, model_weights.trainable))
-    batch_size = tf.shape(batch['x'])[0]
-    num_examples += batch_size
-    loss_sum += outputs.loss * tf.cast(batch_size, tf.float32)
-"""
 
-# assign_sub(var, lr_t * (grad + mu_t * (var - vstar)))
-# tf.print("LEARNING RATE ", client_optimizer.learning_rate)
-# l_r = client_optimizer.learning_rate
-# proximal_term = tf.multiply(l_r, tf.multiply(
-#    mu, tf.subtract(model_weights.trainable, initial_weights.trainable)))
-
-# Check if l_r is already applied by optimizer
-# prox_term = tf.nest.map_structure(lambda a, b: (-1)*mu*(a - b),
-#                      model_weights.trainable,
-#                      initial_weights.trainable)
-# tf.print("PROX TERM ", prox_term)
-
-# client_optimizer.apply_gradients(zip(prox_term,
-#                                     model_weights.trainable))
-
-
-def sparse_ternary_compression(weights_delta, percentage):
+def sparse_ternary_compression(weights_delta, sparsity):
+    """Implementation of STC"""
     dW = tf.reshape(weights_delta, [-1])
 
     dW_size = tf.size(dW)
-    k_float = tf.multiply(percentage, tf.cast(dW_size, tf.float32))
+    k_float = tf.multiply(sparsity, tf.cast(dW_size, tf.float32))
     k_int = tf.cast(tf.math.round(k_float), dtype=tf.int32)
 
     dW_abs = tf.math.abs(dW)
@@ -339,17 +314,19 @@ def sparse_ternary_compression(weights_delta, percentage):
 
 
 def flatten_ad_hoc(weights_delta):
+    """Utility func to flatten and concat weights
+    excluding bias"""
     weights_delta_no_bias_flatten = tf.concat(
             [tf.reshape(weights_delta[0], [-1]),
              tf.reshape(weights_delta[2], [-1]),
              tf.reshape(weights_delta[4], [-1]),
              tf.reshape(weights_delta[6], [-1])], axis=0)
-    #tf.print("Dimension FLATTEN")
-    #tf.print(tf.size(weights_delta_no_bias_flatten))
     return weights_delta_no_bias_flatten
 
-def reshape_ad_hoc(weights_delta_no_bias_flatten, weights_delta):
 
+def reshape_ad_hoc(weights_delta_no_bias_flatten, weights_delta):
+    """Utility func to reshape the tensor
+        to produce originally-shaped weight tensors"""
     conv1 = tf.reshape(tf.slice(weights_delta_no_bias_flatten, begin=[0],
                                                size=[tf.size(weights_delta[0])]),
                                       tf.shape(weights_delta[0]))
@@ -365,6 +342,7 @@ def reshape_ad_hoc(weights_delta_no_bias_flatten, weights_delta):
                                                size=[tf.size(weights_delta[6])]),
                                       tf.shape(weights_delta[6]))
     return conv1, conv2, fc1, fc2
+
 
 def sample_without_replacement(max_val, dim, seed):
     """
@@ -384,134 +362,6 @@ def sample_without_replacement(max_val, dim, seed):
     return indices
 
 
-def my_numpy_func(x):
-  # x will be a numpy array with the contents of the input to the
-  # tf.function
-  print(x)
-  #return np.random.choice(5, x, replace=False)[0]
-  max_val = tf.constant(10)
-  dim = tf.constant(8)
-  return sample_without_replacement(max_val, dim, x)
-
-@tf.function(input_signature=[tf.TensorSpec(None, tf.int64)])
-def tf_function(input):
-  res = tf.numpy_function(my_numpy_func, [input], tf.int32)
-  return res
-"""
-def structured_sparse_ternary_compression(t, n_filters):
-    reshaped_t = tf.reshape(t, (25, 32))
-    means = tf.math.reduce_mean(tf.math.abs(reshaped_t), axis=0)
-    print("means ", means)
-    values, idx = tf.math.top_k(means, k=n_filters)
-    #print("idx ", idx)
-    #print("values ", values)
-    #print("idx reshaped", idx)
-    #print(tf.shape(t))
-    extracted_filters = tf.gather(reshaped_t, idx, axis=1)
-    #extracted_filters_list = [tf.slice(t, [0, f], [25, 1])
-    #                            for f in idx]
-
-    #extracted_filters = tf.concat(extracted_filters_list, axis=1)
-
-    #print(tf.shape(extracted_filters))
-    #print("extr filter ", extracted_filters)
-
-    tensor_original = tf.zeros(tf.shape(reshaped_t), dtype=tf.float32)
-    indices = tf.expand_dims(idx, axis=1)
-
-    #print(tf.shape(extracted_filters))
-    topk_extracted_filters_val, topk_extracted_filters_idx = tf.math.top_k(tf.math.abs(tf.reshape(extracted_filters, [-1])), k=10)
-    topk_extracted_filters_idx_exp = tf.expand_dims(topk_extracted_filters_idx, axis=1)
-
-    topk_extracted_filters_val_with_sign = tf.gather(tf.reshape(extracted_filters, [-1]), topk_extracted_filters_idx)
-
-    extracted_filters_sstc = tf.scatter_nd(topk_extracted_filters_idx_exp, topk_extracted_filters_val_with_sign, tf.shape(tf.reshape(extracted_filters, [-1])))
-    extracted_filters_sstc_reshaped = tf.reshape(extracted_filters_sstc, tf.shape(extracted_filters))
-
-    compressed_t = tf.transpose(tf.tensor_scatter_nd_update(tf.transpose(tensor_original), indices, tf.transpose(extracted_filters_sstc_reshaped)))
-
-    topk_mean_abs = tf.math.reduce_mean(topk_extracted_filters_val)
-    #topk_mean_abs = tf.math.reduce_mean(tf.math.abs(extracted_filters))
-    #print("Mean ", topk_mean_abs)
-
-    where_positive = tf.math.greater(compressed_t, 0)
-    indices_of_pos = tf.where(where_positive)
-
-    where_negative = tf.math.less(compressed_t, 0)
-    indices_of_neg = tf.where(where_negative)
-
-    #tf.print("idx of pos ", tf.reduce_prod(tf.shape(indices_of_pos)))
-    #tf.print("idx of neg ", indices_of_neg)
-    #print("idx of pos ", indices_of_pos)
-
-    are_positive_present = tf.reduce_prod(tf.shape(indices_of_pos))
-    compressed_t_ternary = tf.cond(tf.equal(are_positive_present, 0),
-                                 lambda: compressed_t,
-                                 lambda: tf.tensor_scatter_nd_update(compressed_t, indices_of_pos, tf.fill(tf.slice(tf.shape(indices_of_pos), [0], [1]), topk_mean_abs)))
-    #compressed_t_ternary = tf.tensor_scatter_nd_update(compressed_t, indices_of_pos, tf.fill([tf.reduce_max(tf.shape(indices_of_pos))], topk_mean_abs))
-    are_negative_present = tf.reduce_prod(tf.shape(indices_of_neg))
-    compressed_t_ternary = tf.cond(tf.equal(are_negative_present, 0),
-                                 lambda: compressed_t,
-                                 lambda: tf.tensor_scatter_nd_update(compressed_t_ternary, indices_of_neg, tf.fill(tf.slice(tf.shape(indices_of_neg), [0], [1]), tf.math.negative(topk_mean_abs))))
-    #compressed_t_ternary = tf.tensor_scatter_nd_update(compressed_t_ternary, indices_of_neg, tf.fill([tf.reduce_max(tf.shape(indices_of_neg))], tf.math.negative(topk_mean_abs)))
-
-    return tf.reshape(compressed_t_ternary, tf.shape(t))
-"""
-"""
-def structured_sparse_ternary_compression(conv_updates, fc_updates, n_filters, spars_rate):
-
-  flatten_conv_updates = tf.concat([tf.reshape(w, [25, -1]) for w in conv_updates], axis=1)
-  #print("flatten_w ", flatten_w)
-  #shape_to_reproduce = [tf.shape(w) for w in weights_delta]
-  #means = tf.concat([tf.math.reduce_mean(tf.math.abs(w), axis=0) for w in flatten_conv_updates], axis=0)
-  means = tf.math.reduce_mean(tf.math.abs(flatten_conv_updates), axis=0)
-  #print("means ", means)
-  #n_filters = 10
-  values, idx = tf.math.top_k(means, k=n_filters)
-  #idx_gather = tf.expand_dims(idx, axis=1)
-  extracted_filters = tf.gather(flatten_conv_updates, idx, axis=1)
-  #   tf.print("Post gather")
-  #tensors_original_list = [tf.zeros(tf.shape(s), dtype=tf.float32) for s in shape_to_reproduce]
-  #tensor_original = tf.zeros(tf.shape(flatten_conv_updates), dtype=tf.float32)
-  indices = tf.expand_dims(idx, axis=1)
-  
-  #print(tf.shape(extracted_filters))
-  # HERE CHANGE K
-  # reshape conv1 e conv2.
-  # concat them with the other fc layers.
-  # proceed with ternary comrpression.
-  extracted_filters_flatten = tf.reshape(extracted_filters, [-1])
-  flatten_updates_fc = tf.concat([tf.reshape(w, [-1]) for w in fc_updates], axis=0)
-  flatten_updates = tf.concat([extracted_filters_flatten, flatten_updates_fc], axis=0)
-  # Here change
-  #k = 10
-  spars_rate_tensor = tf.constant(spars_rate, tf.float32)
-  k = tf.cast(tf.math.round(spars_rate_tensor*tf.cast(tf.size(flatten_updates), tf.float32) + spars_rate_tensor*tf.cast(tf.size(flatten_conv_updates), tf.float32)), tf.int32)
-  #print("K ",k)
-  topk_val, topk_idx = tf.math.top_k(tf.math.abs(flatten_updates), k=k)
-  topk_idx_exp = tf.expand_dims(topk_idx, axis=1)
-
-  topk_val_with_sign = tf.gather(flatten_updates, topk_idx)
-  ternary_val = tf.math.reduce_mean(topk_val)
-  #print("Ternary val ", ternary_val)
-  ternary_updates = tf.math.multiply(tf.sign(topk_val_with_sign), tf.fill(tf.shape(topk_val_with_sign), ternary_val))
-
-  updates_sstc = tf.scatter_nd(topk_idx_exp, ternary_updates, tf.shape(flatten_updates))
-  
-  # updates_sstc_reshaped = tf.reshape(extracted_filters_sstc, tf.shape(extracted_filters))
-  flatten_conv_upd_ternary = tf.slice(updates_sstc, [0], [tf.size(extracted_filters)])
-  # TO CHANGE SHAPE
-  #tf.print("Indices ", tf.shape(indices))
-  #tf.print("Updates", tf.shape(tf.reshape(flatten_conv_upd_ternary, tf.shape(extracted_filters))))
-  conv_upd_ternary = tf.transpose(tf.scatter_nd(indices, tf.transpose(tf.reshape(flatten_conv_upd_ternary, tf.shape(extracted_filters))), tf.shape(tf.zeros((64*32+32, 25)))))
-  conv1 = tf.reshape(tf.slice(conv_upd_ternary, [0, 0], [25, 32]), tf.shape(conv_updates[0]))
-  conv2 = tf.reshape(tf.slice(conv_upd_ternary, [0, 32], [25, 32*64]), tf.shape(conv_updates[1]))
-  fc1 = tf.reshape(tf.slice(updates_sstc, [tf.size(extracted_filters)], [3136*512]), tf.shape(fc_updates[0]))
-  fc2 = tf.reshape(tf.slice(updates_sstc, [tf.size(extracted_filters)+ 3136*512], [512*62]), tf.shape(fc_updates[1]))
-  #tf.print("fc1 size: ", tf.size(fc1), "fc2 size: ", tf.size(fc2), "versus ", 3136*512, " ", 512*62)
-  
-  return conv1, conv2, fc1, fc2
-"""
 def max_means_filters_by_sampling(tt, p, n_filters):
     max_idx = 25
     pp = tf.cast(tf.math.round(tf.math.multiply(tf.cast(p, tf.float32), tf.cast(max_idx, tf.float32))), tf.int32)
@@ -539,66 +389,129 @@ def max_means_filters_by_sampling(tt, p, n_filters):
 
     return idx
 
-def structured_sparse_ternary_compression(conv_updates, fc_updates, n_filters, spars_rate):
-  #tf.print("Structured")
-  flatten_conv_updates = tf.concat([tf.reshape(w, [25, -1]) for w in conv_updates], axis=1)
-  sampling = 1.0
-  idx = max_means_filters_by_sampling(flatten_conv_updates, sampling, n_filters)
 
-  extracted_filters = tf.gather(flatten_conv_updates, idx, axis=1)
+def structured_sparse_ternary_compression(conv_updates, fc_updates, n_filters, sparsity):
+    """Implementation of SSTC (Alg. 2 in the paper)
+      conv_updates: a list of convolutional updates with fixed 5x5 kernel size
+      fc_updates: a list of fully connected updates
+      n_filters: the number of top_k filters
+      sparsity: sparsity of STC
 
-  indices = tf.expand_dims(idx, axis=1)
+      Encoding is not implemented here to speed-up simulations,
+      since lossless encoding does not change model results
+      (e.g., accuracy, loss, etc.)
+    """
 
-  # reshape conv1 e conv2
-  # concat them with the other fc layers
-  # proceed with ternary comrpression
-  extracted_filters_flatten = tf.reshape(extracted_filters, [-1])
-  flatten_updates_fc = tf.concat([tf.reshape(w, [-1]) for w in fc_updates], axis=0)
-  flatten_updates = tf.concat([extracted_filters_flatten, flatten_updates_fc], axis=0)
+    flatten_conv_updates = tf.concat([tf.reshape(w, [25, -1]) for w in conv_updates], axis=1)
+    # An additional feature that we would like to support
+    # is to sample the top_k filters just looking at a fraction
+    # of the elements in the kernels
+    # so to reduce computation overhead.
+    # This is set to 1.0 (i.e., considering all the elements)
+    # because this feature is not part of the paper
+    sampling = 1.0
+    idx = max_means_filters_by_sampling(flatten_conv_updates, sampling, n_filters)
 
-  spars_rate_tensor = tf.constant(spars_rate, tf.float32)
-  k = tf.cast(tf.math.round(spars_rate_tensor*tf.cast(tf.size(flatten_updates_fc), tf.float32) + spars_rate_tensor*tf.cast(tf.size(flatten_conv_updates), tf.float32)), tf.int32)
+    # pre-selection of top_k filters for sstc
+    extracted_filters = tf.gather(flatten_conv_updates, idx, axis=1)
 
-  topk_val, topk_idx = tf.math.top_k(tf.math.abs(flatten_updates), k=k)
-  topk_idx_exp = tf.expand_dims(topk_idx, axis=1)
+    indices = tf.expand_dims(idx, axis=1)
 
-  topk_val_with_sign = tf.gather(flatten_updates, topk_idx)
-  ternary_val = tf.math.reduce_mean(topk_val)
+    # concat pre-selected filter updates and fc updates
+    extracted_filters_flatten = tf.reshape(extracted_filters, [-1])
+    flatten_updates_fc = tf.concat([tf.reshape(w, [-1]) for w in fc_updates], axis=0)
+    flatten_updates_with_preselection = tf.concat([extracted_filters_flatten, flatten_updates_fc], axis=0)
 
-  ternary_updates = tf.math.multiply(tf.sign(topk_val_with_sign), tf.fill(tf.shape(topk_val_with_sign), ternary_val))
+    sparsity_as_tensor = tf.constant(sparsity, tf.float32)
+    k = tf.cast(tf.math.round(
+        sparsity_as_tensor * tf.cast(tf.size(flatten_updates_fc), tf.float32) + sparsity_as_tensor * tf.cast(
+            tf.size(flatten_conv_updates), tf.float32)), tf.int32)
 
-  updates_sstc = tf.scatter_nd(topk_idx_exp, ternary_updates, tf.shape(flatten_updates))
-  
+    # firstly calculating sparsied (non-ternary) updates
+    topk_val, topk_idx = tf.math.top_k(tf.math.abs(flatten_updates_with_preselection), k=k)
+    topk_idx_exp = tf.expand_dims(topk_idx, axis=1)
 
-  flatten_conv_upd_ternary = tf.slice(updates_sstc, [0], [tf.size(extracted_filters)])
+    topk_val_with_sign = tf.gather(flatten_updates_with_preselection, topk_idx)
 
-  conv_upd_ternary = tf.transpose(tf.scatter_nd(indices, tf.transpose(tf.reshape(flatten_conv_upd_ternary, tf.shape(extracted_filters))), tf.shape(tf.zeros((64*32+32, 25)))))
-  conv1 = tf.reshape(tf.slice(conv_upd_ternary, [0, 0], [25, 32]), tf.shape(conv_updates[0]))
-  conv2 = tf.reshape(tf.slice(conv_upd_ternary, [0, 32], [25, 32*64]), tf.shape(conv_updates[1]))
-  fc1 = tf.reshape(tf.slice(updates_sstc, [tf.size(extracted_filters)], [3136*512]), tf.shape(fc_updates[0]))
-  fc2 = tf.reshape(tf.slice(updates_sstc, [tf.size(extracted_filters) + 3136*512], [512*62]), tf.shape(fc_updates[1]))
-  
-  return conv1, conv2, fc1, fc2
+    sparsified_preselection = tf.scatter_nd(topk_idx_exp, topk_val_with_sign,
+                                            tf.shape(flatten_updates_with_preselection))
 
+    topk_mean_abs = tf.math.reduce_mean(topk_val)
+    # this check serves to avoid errors
+    # when there aren't negative top_p values or positive top_p values
+    where_positive = tf.math.greater(sparsified_preselection, 0)
+    indices_of_pos = tf.where(where_positive)
+
+    where_negative = tf.math.less(sparsified_preselection, 0)
+    indices_of_neg = tf.where(where_negative)
+
+    are_positive_present = tf.reduce_prod(tf.shape(indices_of_pos))
+    # applying ternary quantization to input tensor (pre-selection of top_k kernels already applies)
+    sparsified_preselection_ternary = tf.cond(tf.equal(are_positive_present, 0),
+                                              lambda: sparsified_preselection,
+                                              lambda: tf.tensor_scatter_nd_update(sparsified_preselection,
+                                                                                  indices_of_pos, tf.fill(
+                                                      tf.slice(tf.shape(indices_of_pos), [0], [1]), topk_mean_abs)))
+
+    are_negative_present = tf.reduce_prod(tf.shape(indices_of_neg))
+    sparsified_preselection_ternary = tf.cond(tf.equal(are_negative_present, 0),
+                                              lambda: sparsified_preselection,
+                                              lambda: tf.tensor_scatter_nd_update(sparsified_preselection_ternary,
+                                                                                  indices_of_neg, tf.fill(
+                                                      tf.slice(tf.shape(indices_of_neg), [0], [1]),
+                                                      tf.math.negative(topk_mean_abs))))
+
+    updates_sstc = sparsified_preselection_ternary
+
+    flatten_conv_upd_ternary = tf.slice(updates_sstc, [0], [tf.size(extracted_filters)])
+
+    # reconstruncting the original shape
+    # and returning sstc updates
+    conv_upd_ternary = tf.transpose(
+        tf.scatter_nd(indices, tf.transpose(tf.reshape(flatten_conv_upd_ternary, tf.shape(extracted_filters))),
+                      tf.shape(tf.transpose(flatten_conv_updates))))
+    # 1 channel, 32 filters in conv1
+    conv1 = tf.reshape(tf.slice(conv_upd_ternary, [0, 0], [25, 32]), tf.shape(conv_updates[0]))
+    # 32 channel, 64 filters in conv2
+    conv2 = tf.reshape(tf.slice(conv_upd_ternary, [0, 32], [25, 32 * 64]), tf.shape(conv_updates[1]))
+    fc1 = tf.reshape(tf.slice(updates_sstc, [tf.size(extracted_filters)], tf.reshape(tf.size(fc_updates[0]), [1])),
+                     tf.shape(fc_updates[0]))
+    fc2 = tf.reshape(
+        tf.slice(updates_sstc, [tf.size(extracted_filters) + tf.size(fc_updates[0])], [tf.size(fc_updates[1])]),
+        tf.shape(fc_updates[1]))
+
+    return conv1, conv2, fc1, fc2
+
+# Just some utility functions to extract data during development
 def count_idx_less_than(t, less_than, starting_idx):
     sliced_t = tf.slice(t, [starting_idx], [less_than])
     where_less = tf.math.less(sliced_t, less_than)
     indices = tf.where(where_less)
-    #print(indices)
     return tf.cast(tf.size(indices), tf.float32)
 
 
 def change_stc_in_structured_stc(update_tensor, idx):
     n_filters = tf.cast(tf.round(tf.math.divide(count_idx_less_than(idx, 800, 0), 25.0)), tf.int32)
-    #tf.print("Number of elements in conv1 ", idx_less_than_conv1)
-    # #tf.print("Number of filters corresponding to structured stc: ", n_filters)
     compressed_conv1 = structured_sparse_ternary_compression(update_tensor, n_filters)
-    #structured_sparse_ternary_compression(update_tensor, n_filters)
     return compressed_conv1
 
 def count_no_zero(t):
-  #sliced_t = tf.slice(t, [starting_idx], [less_than])
   where_diverse = tf.math.not_equal(t, tf.constant(0, tf.float32))
   indices = tf.where(where_diverse)
   tf.print("Not0,", tf.strings.as_string(tf.size(indices)), output_stream="file://update_count_in_conv1_2.out",summarize=-1)
   return tf.size(indices)
+
+
+def my_numpy_func(x):
+  # x will be a numpy array with the contents of the input to the
+  # tf.function
+  print(x)
+  #return np.random.choice(5, x, replace=False)[0]
+  max_val = tf.constant(10)
+  dim = tf.constant(8)
+  return sample_without_replacement(max_val, dim, x)
+
+@tf.function(input_signature=[tf.TensorSpec(None, tf.int64)])
+def tf_function(input):
+  res = tf.numpy_function(my_numpy_func, [input], tf.int32)
+  return res

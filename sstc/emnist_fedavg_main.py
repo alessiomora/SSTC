@@ -22,7 +22,7 @@ np.set_printoptions(precision=None, suppress=None)
 # Training hyperparameters
 flags.DEFINE_integer('total_rounds', 1000, 'Number of total training rounds.')
 flags.DEFINE_integer('rounds_per_eval', 1, 'How often to evaluate')
-flags.DEFINE_integer('train_clients_per_round', 1,
+flags.DEFINE_integer('train_clients_per_round', 50,
                      'How many clients to sample per round.')
 flags.DEFINE_integer('client_epochs_per_round', 5,
                      'Number of epochs in the client to take per round.')
