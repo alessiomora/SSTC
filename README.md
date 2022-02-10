@@ -28,6 +28,9 @@ For example, to specify the total number of rounds for the simulation:
   
 `python emnist_fedavg_main.py --total_rounds=50`
 
+The results of the simulation (e.g., accuracy for each round) will be saved on disk, in a 
+`logs` folder that can be visualized with Tensorboard or with custom script.
+
 ### Default configuration
 The default configuration is:
 
