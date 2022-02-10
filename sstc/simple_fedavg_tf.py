@@ -93,6 +93,7 @@ class ClientOutput(object):
   -   `model_output`: A structure matching
       `tff.learning.Model.report_local_outputs`, reflecting the results of
       training on the input dataset.
+   -  `time_client_update`: time metrics
   """
     weights_delta = attr.ib()
     client_weight = attr.ib()
@@ -199,6 +200,8 @@ def client_update(model, dataset, server_message, client_optimizer):
 
     def difference_model_norm_2_square(global_model, local_model):
         """
+        This is an utility func. if one would try FedProx optimization
+        but it is outside of the paper scope.
         Calculates the squared l2 norm of a model difference (i.e.
         local_model - global_model). This serves if one would like
         to have FedProx optimization.
@@ -234,11 +237,12 @@ def client_update(model, dataset, server_message, client_optimizer):
             # mu = tf.constant(0.3, dtype=tf.float32)
             # prox_term = (mu/2)*difference_model_norm_2_square(model_weights.trainable, initial_weights.trainable)
             # fedprox_loss = outputs.loss + prox_term
-            #----------------------
+            # ----------------------
 
         grads = tape.gradient(outputs.loss, model_weights.trainable)
         # If FedProx is decommented, letting GradientTape dealing with the FedProx's loss
-        #grads = tape.gradient(fedprox_loss, model_weights.trainable)
+        # However, this is not included in the submitted paper.
+        # grads = tape.gradient(fedprox_loss, model_weights.trainable)
 
         client_optimizer.apply_gradients(zip(grads, model_weights.trainable))
 
@@ -257,14 +261,15 @@ def client_update(model, dataset, server_message, client_optimizer):
 
     # Sparse Ternary Compression (STC) - excluding biases
     # De-comment this for STC
-    #weights_delta_no_bias_flatten = flatten_ad_hoc(weights_delta)
-    #stc_updates_no_bias, idx = sparse_ternary_compression(weights_delta_no_bias_flatten, percentage=0.01)
-    #weights_delta[0], weights_delta[2], weights_delta[4], weights_delta[6] = reshape_ad_hoc(stc_updates_no_bias, weights_delta)
+    weights_delta_no_bias_flatten = flatten_ad_hoc(weights_delta)
+    stc_updates_no_bias, idx = sparse_ternary_compression(weights_delta_no_bias_flatten, sparsity=0.01)
+    weights_delta[0], weights_delta[2], weights_delta[4], weights_delta[6] = reshape_ad_hoc(stc_updates_no_bias, weights_delta)
 
     # Structured STC - excluding biases
-    conv_updates = [weight_delta_copy[0], weight_delta_copy[2]] 
-    fc_updates = [weight_delta_copy[4], weight_delta_copy[6]]
-    weights_delta[0], weights_delta[2], weights_delta[4], weights_delta[6] = structured_sparse_ternary_compression(conv_updates, fc_updates, n_filters=260, sparsity=0.01)
+    # conv_updates = [weight_delta_copy[0], weight_delta_copy[2]]
+    # fc_updates = [weight_delta_copy[4], weight_delta_copy[6]]
+    # weights_delta[0], weights_delta[2], weights_delta[4], weights_delta[6] = structured_sparse_ternary_compression(
+    #     conv_updates, fc_updates, n_filters=260, sparsity=0.01)
 
     # Just a time metric
     time_client_update = tf.subtract(tf.timestamp(), init_time)
@@ -273,7 +278,13 @@ def client_update(model, dataset, server_message, client_optimizer):
 
 
 def sparse_ternary_compression(weights_delta, sparsity):
-    """Implementation of STC"""
+    """Implementation of STC
+    Args:
+        weights_delta: weight delta to be compressed via STC
+        sparsity: the non-zero p fraction (0, 1] of the weights delta when applying STC
+
+    Returns: STC weights delta
+        """
     dW = tf.reshape(weights_delta, [-1])
 
     dW_size = tf.size(dW)
@@ -287,9 +298,6 @@ def sparse_ternary_compression(weights_delta, sparsity):
     mu = tf.math.divide_no_nan(tf.reduce_sum(values_for_calculating_mu), k_float)
     mu = tf.reshape(mu, [])
     mu_neg = tf.math.negative(mu)
-
-    # TODO: here add encoding-decoding to 8 bits for mu and mu_neg
-    # excluding indices from the compression
 
     indices = tf.expand_dims(idx, 1)
     values = tf.gather_nd(dW, indices)
@@ -317,10 +325,10 @@ def flatten_ad_hoc(weights_delta):
     """Utility func to flatten and concat weights
     excluding bias"""
     weights_delta_no_bias_flatten = tf.concat(
-            [tf.reshape(weights_delta[0], [-1]),
-             tf.reshape(weights_delta[2], [-1]),
-             tf.reshape(weights_delta[4], [-1]),
-             tf.reshape(weights_delta[6], [-1])], axis=0)
+        [tf.reshape(weights_delta[0], [-1]),
+         tf.reshape(weights_delta[2], [-1]),
+         tf.reshape(weights_delta[4], [-1]),
+         tf.reshape(weights_delta[6], [-1])], axis=0)
     return weights_delta_no_bias_flatten
 
 
@@ -328,36 +336,38 @@ def reshape_ad_hoc(weights_delta_no_bias_flatten, weights_delta):
     """Utility func to reshape the tensor
         to produce originally-shaped weight tensors"""
     conv1 = tf.reshape(tf.slice(weights_delta_no_bias_flatten, begin=[0],
-                                               size=[tf.size(weights_delta[0])]),
-                                      tf.shape(weights_delta[0]))
+                                size=[tf.size(weights_delta[0])]),
+                       tf.shape(weights_delta[0]))
     conv2 = tf.reshape(tf.slice(weights_delta_no_bias_flatten, begin=[tf.size(weights_delta[0])],
-                                               size=[tf.size(weights_delta[2])]),
-                                      tf.shape(weights_delta[2]))
+                                size=[tf.size(weights_delta[2])]),
+                       tf.shape(weights_delta[2]))
     fc1 = tf.reshape(
-            tf.slice(weights_delta_no_bias_flatten, begin=[tf.size(weights_delta[2]) + tf.size(weights_delta[0])],
-                     size=[tf.size(weights_delta[4])]),
-            tf.shape(weights_delta[4]))
+        tf.slice(weights_delta_no_bias_flatten, begin=[tf.size(weights_delta[2]) + tf.size(weights_delta[0])],
+                 size=[tf.size(weights_delta[4])]),
+        tf.shape(weights_delta[4]))
     fc2 = tf.reshape(tf.slice(weights_delta_no_bias_flatten, begin=[
-            tf.size(weights_delta[4]) + tf.size(weights_delta[2]) + tf.size(weights_delta[0])],
-                                               size=[tf.size(weights_delta[6])]),
-                                      tf.shape(weights_delta[6]))
+        tf.size(weights_delta[4]) + tf.size(weights_delta[2]) + tf.size(weights_delta[0])],
+                              size=[tf.size(weights_delta[6])]),
+                     tf.shape(weights_delta[6]))
     return conv1, conv2, fc1, fc2
 
 
 def sample_without_replacement(max_val, dim, seed):
     """
     Sampling without replacement with tf operations. Extract values in the range (0, max]
-    Inputs:
-    max_val, the maximum value of the extracted values
-    K, tf.constant that represents the dimension of the resulting tensor
-    seed, seed for reproducible results
-    Returns a int32 tf.tensor
+
+    Args:
+        max_val: the maximum value of the extracted values
+        K: tf.constant that represents the dimension of the resulting tensor
+        seed: seed for reproducible results
+
+    Returns: a int32 tf.tensor
     """
 
     logits = tf.zeros([max_val])
     tf.random.set_seed(5)
     z = -tf.math.log(-tf.math.log(tf.random.uniform(tf.shape(logits), 0, 1, seed=seed)))
-    #z = -tf.math.log(-tf.math.log(tf.random.uniform(tf.shape(logits), 0, 1, seed=int(tf.reduce_sum(seed)))))
+    # z = -tf.math.log(-tf.math.log(tf.random.uniform(tf.shape(logits), 0, 1, seed=int(tf.reduce_sum(seed)))))
     _, indices = tf.nn.top_k(logits + z, dim)
     return indices
 
@@ -365,9 +375,10 @@ def sample_without_replacement(max_val, dim, seed):
 def max_means_filters_by_sampling(tt, p, n_filters):
     max_idx = 25
     pp = tf.cast(tf.math.round(tf.math.multiply(tf.cast(p, tf.float32), tf.cast(max_idx, tf.float32))), tf.int32)
-    #print(pp)
+
+    # print(pp)
     def sample_without_replacement(max_val, dim, seed):
-      """
+        """
       Sampling without replacement with tf operations. Extract values in the range (0, max]
       Inputs:
       max_val, the maximum value of the extracted values
@@ -375,11 +386,11 @@ def max_means_filters_by_sampling(tt, p, n_filters):
       seed, seed for reproducible results
       Returns a int32 tf.tensor
       """
-      logits = tf.zeros([max_val])
-      #tf.random.set_seed(5)
-      z = -tf.math.log(-tf.math.log(tf.random.uniform(tf.shape(logits), 0, 1)))
-      _, indices = tf.nn.top_k(logits + z, dim)
-      return indices
+        logits = tf.zeros([max_val])
+        # tf.random.set_seed(5)
+        z = -tf.math.log(-tf.math.log(tf.random.uniform(tf.shape(logits), 0, 1)))
+        _, indices = tf.nn.top_k(logits + z, dim)
+        return indices
 
     extracted = sample_without_replacement(max_idx, pp, None)
     res = tf.gather(tt, extracted, axis=0)
@@ -391,15 +402,18 @@ def max_means_filters_by_sampling(tt, p, n_filters):
 
 
 def structured_sparse_ternary_compression(conv_updates, fc_updates, n_filters, sparsity):
-    """Implementation of SSTC (Alg. 2 in the paper)
+    """Implementation of SSTC (Alg. 2 in the paper).
+    Encoding is not implemented here to speed-up simulations,
+    since lossless encoding does not change model results
+    (e.g., accuracy, loss, etc.)
+
+    Args:
       conv_updates: a list of convolutional updates with fixed 5x5 kernel size
       fc_updates: a list of fully connected updates
       n_filters: the number of top_k filters
       sparsity: sparsity of STC
 
-      Encoding is not implemented here to speed-up simulations,
-      since lossless encoding does not change model results
-      (e.g., accuracy, loss, etc.)
+    Returns: SSTC weight deltas
     """
 
     flatten_conv_updates = tf.concat([tf.reshape(w, [25, -1]) for w in conv_updates], axis=1)
@@ -482,6 +496,7 @@ def structured_sparse_ternary_compression(conv_updates, fc_updates, n_filters, s
 
     return conv1, conv2, fc1, fc2
 
+
 # Just some utility functions to extract data during development
 def count_idx_less_than(t, less_than, starting_idx):
     sliced_t = tf.slice(t, [starting_idx], [less_than])
@@ -495,23 +510,26 @@ def change_stc_in_structured_stc(update_tensor, idx):
     compressed_conv1 = structured_sparse_ternary_compression(update_tensor, n_filters)
     return compressed_conv1
 
+
 def count_no_zero(t):
-  where_diverse = tf.math.not_equal(t, tf.constant(0, tf.float32))
-  indices = tf.where(where_diverse)
-  tf.print("Not0,", tf.strings.as_string(tf.size(indices)), output_stream="file://update_count_in_conv1_2.out",summarize=-1)
-  return tf.size(indices)
+    where_diverse = tf.math.not_equal(t, tf.constant(0, tf.float32))
+    indices = tf.where(where_diverse)
+    tf.print("Not0,", tf.strings.as_string(tf.size(indices)), output_stream="file://update_count_in_conv1_2.out",
+             summarize=-1)
+    return tf.size(indices)
 
 
 def my_numpy_func(x):
-  # x will be a numpy array with the contents of the input to the
-  # tf.function
-  print(x)
-  #return np.random.choice(5, x, replace=False)[0]
-  max_val = tf.constant(10)
-  dim = tf.constant(8)
-  return sample_without_replacement(max_val, dim, x)
+    # x will be a numpy array with the contents of the input to the
+    # tf.function
+    print(x)
+    # return np.random.choice(5, x, replace=False)[0]
+    max_val = tf.constant(10)
+    dim = tf.constant(8)
+    return sample_without_replacement(max_val, dim, x)
+
 
 @tf.function(input_signature=[tf.TensorSpec(None, tf.int64)])
 def tf_function(input):
-  res = tf.numpy_function(my_numpy_func, [input], tf.int32)
-  return res
+    res = tf.numpy_function(my_numpy_func, [input], tf.int32)
+    return res
