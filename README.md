@@ -28,21 +28,48 @@ For example, to specify the total number of rounds for the simulation:
   
 `python emnist_fedavg_main.py --total_rounds=50`
 
-### Default Configuration for STC and SSTC
-The default configuration considers 50 clients (randomly selected), 1000 total rounds,
-SGD with 0.1 learning rate as local optimizer, 5 local epochs per client.
-The default configuration for STC has sparsity = 1%, and fraction of filters = 12.5% for SSTC.
+### Default Configuration
+The default configuration is:
 
-You can specify different compression parameters by using:
-  
-`python emnist_fedavg_main.py --stc_sparsity=0.01 --sstc_filter_fraction=0.125`
+`emnist_fedavg_main.py:
+  --batch_size: Batch size used on the client.
+    (default: '16')
+    (an integer)
+  --client_epochs_per_round: Number of epochs in the client to take per round.
+    (default: '5')
+    (an integer)
+  --client_learning_rate: Client learning rate.
+    (default: '0.1')
+    (a number)
+  --rounds_per_eval: How often to evaluate
+    (default: '1')
+    (an integer)
+  --server_learning_rate: Server learning rate.
+    (default: '1.0')
+    (a number)
+  --sstc_filter_fraction: Client learning rate (0, 1]
+    (default: '0.125')
+    (a number)
+  --stc_sparsity: STC sparsity (0, 1]
+    (default: '0.01')
+    (a number)
+  --test_batch_size: Minibatch size of test data.
+    (default: '128')
+    (an integer)
+  --total_rounds: Number of total training rounds.
+    (default: '1000')
+    (an integer)
+  --train_clients_per_round: How many clients to sample per round.
+    (default: '50')
+    (an integer)`
+
 
 ### Enabling STC or SSTC
 To enable STC, use a value for `--stc_sparsity` < 1 and a value for `--sstc_filter_fraction` == 1.0.
   
 To enable SSTC, use a value for `--stc_sparsity` < 1 and a value for `--sstc_filter_fraction` < 1.0.
 
-For uncompressed FedAvg, use `--stc_sparsity=1.0`.  
+For uncompressed FedAvg, use `--stc_sparsity=1.0`.
   
 At default, the simulation will run SSTC with `--stc_sparsity=0.01` and `--stc_sparsity=0.125`, which are the
 best configuration for the communication-efficiency/model accuracy trade-off (Fig.3 (a), (b) in the paper).
