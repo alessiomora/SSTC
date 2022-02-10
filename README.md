@@ -37,10 +37,12 @@ You can specify different compression parameters by using:
   
 `python emnist_fedavg_main.py --stc_sparsity=0.01 --sstc_filter_fraction=0.125`
 
-### Enable STC or SSTC
-To enable STC, pass a value for `--stc_sparsity` < 1 and a value for `--sstc_filter_fraction` == 1.0.
+### Enabling STC or SSTC
+To enable STC, use a value for `--stc_sparsity` < 1 and a value for `--sstc_filter_fraction` == 1.0.
   
-To enable SSTC, pass a value for `--stc_sparsity` < 1 and a value for `--sstc_filter_fraction` == 1.0.
+To enable SSTC, use a value for `--stc_sparsity` < 1 and a value for `--sstc_filter_fraction` < 1.0.
 
+For uncompressed FedAvg, use `--stc_sparsity=1.0`.  
+  
 At default, the simulation will run SSTC with `--stc_sparsity=0.01` and `--stc_sparsity=0.125`, which are the
 best configuration for the communication-efficiency/model accuracy trade-off (Fig.3 (a), (b) in the paper).
