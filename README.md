@@ -14,7 +14,7 @@ We tested the code on Ubuntu 20.04, with Python v3.8.10 and tensorflow-federated
 
 ## Running the simulation
 Activate your virtual environment and run the following command from the sstc directory. It will use 
-the default congifuration (1000 total round, 50 clients, 5 local epochs, 0.1 client lr (SGD), 1.0 as server lr (SGD), 16 as batch size, 128 as test batch size,
+the default configuration (1000 total round, 50 clients, 5 local epochs, 0.1 client lr (SGD), 1.0 as server lr (SGD), 16 as batch size, 128 as test batch size,
 evaluation on each round).
 
 `python emnist_fedavg_main.py`   
@@ -24,10 +24,23 @@ is the current default tuning run:
 
 `python emnist_fedavg_main.py --helpshort`
 
-For example, to specify the total number of rounds for the simulation:
+For example, to specify the total number of rounds for the simulation:  
+  
 `python emnist_fedavg_main.py --total_rounds=50`
 
-### Default Configuration
+### Default Configuration for STC and SSTC
 The default configuration considers 50 clients (randomly selected), 1000 total rounds,
 SGD with 0.1 learning rate as local optimizer, 5 local epochs per client.
 The default configuration for STC has sparsity = 1%, and fraction of filters = 12.5% for SSTC.
+
+You can specify different compression parameters by using:
+  
+`python emnist_fedavg_main.py --stc_sparsity=0.01 --sstc_filter_fraction=0.125`
+
+### Enable STC or SSTC
+To enable STC, pass a value for `--stc_sparsity` < 1 and a value for `--sstc_filter_fraction` == 1.0.
+  
+To enable SSTC, pass a value for `--stc_sparsity` < 1 and a value for `--sstc_filter_fraction` == 1.0.
+
+At default, the simulation will run SSTC with `--stc_sparsity=0.01` and `--stc_sparsity=0.125`, which are the
+best configuration for the communication-efficiency/model accuracy trade-off (Fig.3 (a), (b) in the paper).
