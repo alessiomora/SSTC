@@ -13,15 +13,8 @@ Here the official guide to install TFF:
 We tested the code on Ubuntu 20.04, with Python v3.8.10 and tensorflow-federated v0.19.
 
 ## Running the simulation
-Activate your virtual environment and run the following command from the fedavg directory.
+Activate your virtual environment and run the following command from the sstc directory.
 
 `python emnist_fedavg_main.py`   
 
-## Visualizing the results as in the paper
 
-
-metadata should be in OntoKB
-OTEAPI per produrre/estrarre metadati
-material for the training
-
-venue: Network service management
