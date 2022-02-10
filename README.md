@@ -28,7 +28,7 @@ For example, to specify the total number of rounds for the simulation:
   
 `python emnist_fedavg_main.py --total_rounds=50`
 
-### Default Configuration
+### Default configuration
 The default configuration is:
 
 `emnist_fedavg_main.py:
