@@ -65,7 +65,7 @@ The default configuration is:
 
 
 ### Enabling STC or SSTC
-To enable STC, use a value for `--stc_sparsity` < 1 and a value for `--sstc_filter_fraction` == 1.0.
+To enable STC, use a value for `--stc_sparsity` < 1 and `--sstc_filter_fraction=1.0`.
   
 To enable SSTC, use a value for `--stc_sparsity` < 1 and a value for `--sstc_filter_fraction` < 1.0.
 
