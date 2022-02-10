@@ -113,6 +113,8 @@ class ServerState(object):
     model_weights = attr.ib()
     optimizer_state = attr.ib()
     round_num = attr.ib()
+    stc_sparsity = attr.ib()
+    sstc_filter = attr.ib()
 
 
 @attr.s(eq=False, frozen=True, slots=True)
@@ -128,6 +130,8 @@ class BroadcastMessage(object):
   """
     model_weights = attr.ib()
     round_num = attr.ib()
+    stc_sparsity = attr.ib()
+    sstc_filter = attr.ib()
 
 
 @tf.function
@@ -181,7 +185,10 @@ def build_server_broadcast_message(server_state):
   """
     return BroadcastMessage(
         model_weights=server_state.model_weights,
-        round_num=server_state.round_num)
+        round_num=server_state.round_num,
+        stc_sparsity=server_state.stc_sparsity,
+        sstc_filter=server_state.sstc_filter
+    )
 
 
 @tf.function
@@ -259,17 +266,21 @@ def client_update(model, dataset, server_message, client_optimizer):
     for ww in weights_delta:
         weight_delta_copy.append(tf.identity(ww))
 
-    # Sparse Ternary Compression (STC) - excluding biases
-    # De-comment this for STC
-    weights_delta_no_bias_flatten = flatten_ad_hoc(weights_delta)
-    stc_updates_no_bias, idx = sparse_ternary_compression(weights_delta_no_bias_flatten, sparsity=0.01)
-    weights_delta[0], weights_delta[2], weights_delta[4], weights_delta[6] = reshape_ad_hoc(stc_updates_no_bias, weights_delta)
-
-    # Structured STC - excluding biases
-    # conv_updates = [weight_delta_copy[0], weight_delta_copy[2]]
-    # fc_updates = [weight_delta_copy[4], weight_delta_copy[6]]
-    # weights_delta[0], weights_delta[2], weights_delta[4], weights_delta[6] = structured_sparse_ternary_compression(
-    #     conv_updates, fc_updates, n_filters=260, sparsity=0.01)
+    # If stc_sparsity < 1 and sstc_filter == 1, apply STC
+    if tf.equal(server_message.sstc_filter, 1) and tf.less(server_message.stc_sparsity, 1):
+        # Sparse Ternary Compression (STC) - excluding biases
+        # De-comment this for STC
+        weights_delta_no_bias_flatten = flatten_ad_hoc(weights_delta)
+        stc_updates_no_bias, idx = sparse_ternary_compression(weights_delta_no_bias_flatten, sparsity=0.01)
+        weights_delta[0], weights_delta[2], weights_delta[4], weights_delta[6] = reshape_ad_hoc(stc_updates_no_bias,
+                                                                                                weights_delta)
+    # If stc_sparsity < 1 and sstc_filter <1, apply SSTC
+    if tf.less(server_message.sstc_filter, 1) and tf.less(server_message.stc_sparsity, 1):
+        # Structured STC - excluding biases
+        conv_updates = [weight_delta_copy[0], weight_delta_copy[2]]
+        fc_updates = [weight_delta_copy[4], weight_delta_copy[6]]
+        weights_delta[0], weights_delta[2], weights_delta[4], weights_delta[6] = structured_sparse_ternary_compression(
+             conv_updates, fc_updates, n_filters=260, sparsity=0.01)
 
     # Just a time metric
     time_client_update = tf.subtract(tf.timestamp(), init_time)
