@@ -33,6 +33,9 @@ flags.DEFINE_integer('test_batch_size', 128, 'Minibatch size of test data.')
 flags.DEFINE_float('server_learning_rate', 1.0, 'Server learning rate.')
 flags.DEFINE_float('client_learning_rate', 0.1, 'Client learning rate.')
 
+flags.DEFINE_float('stc_sparsity', 0.01, 'STC sparsity (0, 1]')
+flags.DEFINE_float('sstc_filter_fraction', 0.125, 'Client learning rate (0, 1]')
+
 FLAGS = flags.FLAGS
 
 
@@ -120,11 +123,11 @@ def main(argv):
         raise app.UsageError('Too many command-line arguments.')
 
     # Preparing the directory to save run results
-    # This may throw errors if there is no logs/SSTC dir existing
     root_logdir = os.path.abspath(os.path.join("logs", "SSTC"))
 
-    run_id = "C{0}_E{1}_SSTC".format(str(FLAGS.train_clients_per_round),
-                                     str(FLAGS.client_epochs_per_round))
+    run_id = "C{0}_E{1}_sparsity{2}_filter_fraction{3}".format(str(FLAGS.train_clients_per_round),
+                                     str(FLAGS.client_epochs_per_round), str(round(FLAGS.stc_sparsity, 3)),
+                                                               str(round(FLAGS.sstc_filter_fraction, 4)))
     run_logdir_test = os.path.join(root_logdir, run_id, "test")
     test_summary_writer = tf.summary.create_file_writer(run_logdir_test)
 
@@ -145,13 +148,13 @@ def main(argv):
     def tff_model_fn():
         """Constructs a fully initialized model for use in federated averaging."""
         keras_model = create_original_fedavg_cnn_model(only_digits=False)
-        keras_model.summary()
+        # keras_model.summary()
         loss = tf.keras.losses.SparseCategoricalCrossentropy(from_logits=True)
         return simple_fedavg_tf.KerasModelWrapper(keras_model,
                                                   test_data.element_spec, loss)
 
     iterative_process = simple_fedavg_tff.build_federated_averaging_process(
-        tff_model_fn, server_optimizer_fn, client_optimizer_fn)
+        tff_model_fn, server_optimizer_fn, client_optimizer_fn, FLAGS.stc_sparsity, FLAGS.sstc_filter_fraction)
     server_state = iterative_process.initialize()
 
     metric = tf.keras.metrics.SparseCategoricalAccuracy(name='test_accuracy')
