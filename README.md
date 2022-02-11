@@ -14,8 +14,7 @@ We tested the code on Ubuntu 20.04, with Python v3.8.10 and tensorflow-federated
 
 ## Running the simulation
 Activate your virtual environment and run the following command from the sstc directory. It will use 
-the default configuration (1000 total round, 50 clients, 5 local epochs, 0.1 client lr (SGD), 1.0 as server lr (SGD), 16 as batch size, 128 as test batch size,
-evaluation on each round).
+the default configuration (see below for detail).
 
 `python emnist_fedavg_main.py`   
 
@@ -34,35 +33,35 @@ The results of the simulation (e.g., accuracy for each round) will be saved on d
 ### Default configuration
 The default configuration is:
 
-`emnist_fedavg_main.py:
-  --batch_size: Batch size used on the client.
+`emnist_fedavg_main.py:`  
+ `  --batch_size: Batch size used on the client.
     (default: '16')
-    (an integer)
-  --client_epochs_per_round: Number of epochs in the client to take per round.
+    (an integer)`  
+`  --client_epochs_per_round: Number of epochs in the client to take per round.
     (default: '5')
-    (an integer)
-  --client_learning_rate: Client learning rate.
+    (an integer)`  
+` --client_learning_rate: Client learning rate.
     (default: '0.1')
-    (a number)
-  --rounds_per_eval: How often to evaluate
+    (a number)`  
+` --rounds_per_eval: How often to evaluate
     (default: '1')
-    (an integer)
-  --server_learning_rate: Server learning rate.
+    (an integer)`    
+`  --server_learning_rate: Server learning rate.
     (default: '1.0')
-    (a number)
-  --sstc_filter_fraction: Client learning rate (0, 1]
+    (a number)`  
+`  --sstc_filter_fraction: Client learning rate (0, 1]
     (default: '0.125')
-    (a number)
-  --stc_sparsity: STC sparsity (0, 1]
+    (a number)`  
+`  --stc_sparsity: STC sparsity (0, 1]
     (default: '0.01')
-    (a number)
-  --test_batch_size: Minibatch size of test data.
+    (a number)`  
+`  --test_batch_size: Minibatch size of test data.
     (default: '128')
-    (an integer)
-  --total_rounds: Number of total training rounds.
+    (an integer)`  
+`  --total_rounds: Number of total training rounds.
     (default: '1000')
-    (an integer)
-  --train_clients_per_round: How many clients to sample per round.
+    (an integer)`  
+`  --train_clients_per_round: How many clients to sample per round.
     (default: '50')
     (an integer)`
 
