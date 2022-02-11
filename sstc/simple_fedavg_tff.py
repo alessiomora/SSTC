@@ -43,7 +43,7 @@ def build_federated_averaging_process(
         server_optimizer_fn=lambda: tf.keras.optimizers.SGD(learning_rate=1.0),
         client_optimizer_fn=lambda: tf.keras.optimizers.SGD(learning_rate=0.1),
         stc_sparsity=0.01,
-        sstc_filter=0.125):
+        sstc_kernel=0.125):
     """Builds the TFF computations for optimization using federated averaging.
 
   Args:
@@ -54,8 +54,8 @@ def build_federated_averaging_process(
     client_optimizer_fn: A no-arg function that returns a
       `tf.keras.optimizers.Optimizer` for client update.
     stc_sparsity: A constant to signify sparsity in STC.
-    sstc_filter: A constant to signify the fraction of
-      filter to consider in SSTC.
+    sstc_kernel: A constant to signify the fraction of
+      kernels to consider in SSTC.
 
   Returns:
     A `tff.templates.IterativeProcess`.
@@ -73,7 +73,7 @@ def build_federated_averaging_process(
             optimizer_state=server_optimizer.variables(),
             round_num=0,
             stc_sparsity=stc_sparsity,
-            sstc_filter=sstc_filter)
+            sstc_kernel=sstc_kernel)
 
     server_state_type = server_init_tf.type_signature.result
 

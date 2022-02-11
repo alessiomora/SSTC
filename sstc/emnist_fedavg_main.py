@@ -33,8 +33,12 @@ flags.DEFINE_integer('test_batch_size', 128, 'Minibatch size of test data.')
 flags.DEFINE_float('server_learning_rate', 1.0, 'Server learning rate.')
 flags.DEFINE_float('client_learning_rate', 0.1, 'Client learning rate.')
 
+# Configuration for STC and SSTC
+# To enable STC, use a value for --stc_sparsity < 1 and --sstc_filter_fraction=1.0.
+# To enable SSTC, use a value for --stc_sparsity < 1 and a value for --sstc_filter_fraction < 1.0.
+# For uncompressed FedAvg, use --stc_sparsity=1.0
 flags.DEFINE_float('stc_sparsity', 0.01, 'STC sparsity (0, 1]')
-flags.DEFINE_float('sstc_filter_fraction', 0.125, 'Client learning rate (0, 1]')
+flags.DEFINE_float('sstc_kernel_fraction', 0.125, 'Client learning rate (0, 1]')
 
 FLAGS = flags.FLAGS
 
@@ -125,9 +129,9 @@ def main(argv):
     # Preparing the directory to save run results
     root_logdir = os.path.abspath(os.path.join("logs", "SSTC"))
 
-    run_id = "C{0}_E{1}_sparsity{2}_filter_fraction{3}".format(str(FLAGS.train_clients_per_round),
+    run_id = "C{0}_E{1}_sparsity{2}_kernel_fraction{3}".format(str(FLAGS.train_clients_per_round),
                                      str(FLAGS.client_epochs_per_round), str(round(FLAGS.stc_sparsity, 3)),
-                                                               str(round(FLAGS.sstc_filter_fraction, 4)))
+                                                               str(round(FLAGS.sstc_kernel_fraction, 4)))
     run_logdir_test = os.path.join(root_logdir, run_id, "test")
     test_summary_writer = tf.summary.create_file_writer(run_logdir_test)
 
@@ -154,7 +158,7 @@ def main(argv):
                                                   test_data.element_spec, loss)
 
     iterative_process = simple_fedavg_tff.build_federated_averaging_process(
-        tff_model_fn, server_optimizer_fn, client_optimizer_fn, FLAGS.stc_sparsity, FLAGS.sstc_filter_fraction)
+        tff_model_fn, server_optimizer_fn, client_optimizer_fn, FLAGS.stc_sparsity, FLAGS.sstc_kernel_fraction)
     server_state = iterative_process.initialize()
 
     metric = tf.keras.metrics.SparseCategoricalAccuracy(name='test_accuracy')

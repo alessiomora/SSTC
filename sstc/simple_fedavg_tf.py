@@ -110,13 +110,13 @@ class ServerState(object):
   -   `optimizer_state`: Variables of optimizer.
   -   'round_num': Current round index
   -   'stc_sparsity': Sparsity that clients apply in STC and SSTC if enabled
-  -   'sstc_filter': Fraction of filter to consider for SSTC
+  -   'sstc_kernel': Fraction of kernel to consider for SSTC
   """
     model_weights = attr.ib()
     optimizer_state = attr.ib()
     round_num = attr.ib()
     stc_sparsity = attr.ib()
-    sstc_filter = attr.ib()
+    sstc_kernel = attr.ib()
 
 
 @attr.s(eq=False, frozen=True, slots=True)
@@ -133,7 +133,7 @@ class BroadcastMessage(object):
     model_weights = attr.ib()
     round_num = attr.ib()
     stc_sparsity = attr.ib()
-    sstc_filter = attr.ib()
+    sstc_kernel = attr.ib()
 
 
 @tf.function
@@ -189,7 +189,7 @@ def build_server_broadcast_message(server_state):
         model_weights=server_state.model_weights,
         round_num=server_state.round_num,
         stc_sparsity=server_state.stc_sparsity,
-        sstc_filter=server_state.sstc_filter
+        sstc_kernel=server_state.sstc_kernel
     )
 
 
@@ -268,8 +268,8 @@ def client_update(model, dataset, server_message, client_optimizer):
     for ww in weights_delta:
         weight_delta_copy.append(tf.identity(ww))
 
-    # If stc_sparsity < 1 and sstc_filter == 1, apply STC
-    if tf.equal(server_message.sstc_filter, 1) and tf.less(server_message.stc_sparsity, 1):
+    # If stc_sparsity < 1 and sstc_kernel == 1, apply STC
+    if tf.equal(server_message.sstc_kernel, 1) and tf.less(server_message.stc_sparsity, 1):
         # Sparse Ternary Compression (STC) - excluding biases
         # De-comment this for STC
         weights_delta_no_bias_flatten = flatten_ad_hoc(weights_delta)
@@ -277,13 +277,13 @@ def client_update(model, dataset, server_message, client_optimizer):
                                                               sparsity=server_message.stc_sparsity)
         weights_delta[0], weights_delta[2], weights_delta[4], weights_delta[6] = reshape_ad_hoc(stc_updates_no_bias,
                                                                                                 weights_delta)
-    # If stc_sparsity < 1 and sstc_filter <1, apply SSTC
-    if tf.less(server_message.sstc_filter, 1) and tf.less(server_message.stc_sparsity, 1):
+    # If stc_sparsity < 1 and sstc_kernel <1, apply SSTC
+    if tf.less(server_message.sstc_kernel, 1) and tf.less(server_message.stc_sparsity, 1):
         # Structured STC - excluding biases
         conv_updates = [weight_delta_copy[0], weight_delta_copy[2]]
         fc_updates = [weight_delta_copy[4], weight_delta_copy[6]]
         weights_delta[0], weights_delta[2], weights_delta[4], weights_delta[6] = structured_sparse_ternary_compression(
-             conv_updates, fc_updates, filter_fraction=server_message.sstc_filter, sparsity=server_message.stc_sparsity)
+             conv_updates, fc_updates, kernel_fraction=server_message.sstc_kernel, sparsity=server_message.stc_sparsity)
 
     # Just a time metric
     time_client_update = tf.subtract(tf.timestamp(), init_time)
@@ -386,7 +386,7 @@ def sample_without_replacement(max_val, dim, seed):
     return indices
 
 
-def max_means_filters_by_sampling(tt, p, n_filters):
+def max_means_kernels_by_sampling(tt, p, n_kernel):
     max_idx = 25
     pp = tf.cast(tf.math.round(tf.math.multiply(tf.cast(p, tf.float32), tf.cast(max_idx, tf.float32))), tf.int32)
 
@@ -410,12 +410,12 @@ def max_means_filters_by_sampling(tt, p, n_filters):
     res = tf.gather(tt, extracted, axis=0)
     # res rows are non ordered; for the scope of calculating the mean this does not matter
     means = tf.math.reduce_mean(tf.math.abs(res), axis=0)
-    _, idx = tf.math.top_k(means, k=n_filters)
+    _, idx = tf.math.top_k(means, k=n_kernel)
 
     return idx
 
 
-def structured_sparse_ternary_compression(conv_updates, fc_updates, filter_fraction, sparsity):
+def structured_sparse_ternary_compression(conv_updates, fc_updates, kernel_fraction, sparsity):
     """Implementation of SSTC (Alg. 2 in the paper).
     Encoding is not implemented here to speed-up simulations,
     since lossless encoding does not change model results
@@ -424,7 +424,7 @@ def structured_sparse_ternary_compression(conv_updates, fc_updates, filter_fract
     Args:
       conv_updates: a list of convolutional updates with fixed 5x5 kernel size
       fc_updates: a list of fully connected updates
-      filter_fraction: the fraction of top_k filters
+      kernel_fraction: the fraction of top_k kernels
       sparsity: sparsity of STC
 
     Returns: SSTC weight deltas
@@ -432,26 +432,26 @@ def structured_sparse_ternary_compression(conv_updates, fc_updates, filter_fract
 
     flatten_conv_updates = tf.concat([tf.reshape(w, [25, -1]) for w in conv_updates], axis=1)
     # An additional feature that we would like to support
-    # is to sample the top_k filters just looking at a fraction
+    # is to sample the top_k kernels just looking at a fraction
     # of the elements in the kernels
     # so to reduce computation overhead.
     # This is set to 1.0 (i.e., considering all the elements)
     # because this feature is not part of the paper
     sampling = 1.0
-    total_filters = tf.constant(2080, tf.float32)
-    n_filters = tf.cast(tf.math.round(
-        tf.cast(filter_fraction, tf.float32) * total_filters), tf.int32)
-    idx = max_means_filters_by_sampling(flatten_conv_updates, sampling, n_filters)
+    total_kernels = tf.constant(2080, tf.float32)
+    n_kernels = tf.cast(tf.math.round(
+        tf.cast(kernel_fraction, tf.float32) * total_kernels), tf.int32)
+    idx = max_means_kernels_by_sampling(flatten_conv_updates, sampling, n_kernels)
 
-    # pre-selection of top_k filters for sstc
-    extracted_filters = tf.gather(flatten_conv_updates, idx, axis=1)
+    # pre-selection of top_k kernels for sstc
+    extracted_kernels = tf.gather(flatten_conv_updates, idx, axis=1)
 
     indices = tf.expand_dims(idx, axis=1)
 
-    # concat pre-selected filter updates and fc updates
-    extracted_filters_flatten = tf.reshape(extracted_filters, [-1])
+    # concat pre-selected kernel updates and fc updates
+    extracted_kernels_flatten = tf.reshape(extracted_kernels, [-1])
     flatten_updates_fc = tf.concat([tf.reshape(w, [-1]) for w in fc_updates], axis=0)
-    flatten_updates_with_preselection = tf.concat([extracted_filters_flatten, flatten_updates_fc], axis=0)
+    flatten_updates_with_preselection = tf.concat([extracted_kernels_flatten, flatten_updates_fc], axis=0)
 
     sparsity_as_tensor = tf.cast(sparsity, tf.float32)
     k = tf.cast(tf.math.round(
@@ -494,21 +494,21 @@ def structured_sparse_ternary_compression(conv_updates, fc_updates, filter_fract
 
     updates_sstc = sparsified_preselection_ternary
 
-    flatten_conv_upd_ternary = tf.slice(updates_sstc, [0], [tf.size(extracted_filters)])
+    flatten_conv_upd_ternary = tf.slice(updates_sstc, [0], [tf.size(extracted_kernels)])
 
     # reconstruncting the original shape
     # and returning sstc updates
     conv_upd_ternary = tf.transpose(
-        tf.scatter_nd(indices, tf.transpose(tf.reshape(flatten_conv_upd_ternary, tf.shape(extracted_filters))),
+        tf.scatter_nd(indices, tf.transpose(tf.reshape(flatten_conv_upd_ternary, tf.shape(extracted_kernels))),
                       tf.shape(tf.transpose(flatten_conv_updates))))
     # 1 channel, 32 filters in conv1
     conv1 = tf.reshape(tf.slice(conv_upd_ternary, [0, 0], [25, 32]), tf.shape(conv_updates[0]))
     # 32 channel, 64 filters in conv2
     conv2 = tf.reshape(tf.slice(conv_upd_ternary, [0, 32], [25, 32 * 64]), tf.shape(conv_updates[1]))
-    fc1 = tf.reshape(tf.slice(updates_sstc, [tf.size(extracted_filters)], tf.reshape(tf.size(fc_updates[0]), [1])),
+    fc1 = tf.reshape(tf.slice(updates_sstc, [tf.size(extracted_kernels)], tf.reshape(tf.size(fc_updates[0]), [1])),
                      tf.shape(fc_updates[0]))
     fc2 = tf.reshape(
-        tf.slice(updates_sstc, [tf.size(extracted_filters) + tf.size(fc_updates[0])], [tf.size(fc_updates[1])]),
+        tf.slice(updates_sstc, [tf.size(extracted_kernels) + tf.size(fc_updates[0])], [tf.size(fc_updates[1])]),
         tf.shape(fc_updates[1]))
 
     return conv1, conv2, fc1, fc2
@@ -523,8 +523,8 @@ def count_idx_less_than(t, less_than, starting_idx):
 
 
 def change_stc_in_structured_stc(update_tensor, idx):
-    n_filters = tf.cast(tf.round(tf.math.divide(count_idx_less_than(idx, 800, 0), 25.0)), tf.int32)
-    compressed_conv1 = structured_sparse_ternary_compression(update_tensor, n_filters)
+    n_kernels = tf.cast(tf.round(tf.math.divide(count_idx_less_than(idx, 800, 0), 25.0)), tf.int32)
+    compressed_conv1 = structured_sparse_ternary_compression(update_tensor, n_kernels)
     return compressed_conv1
 
 
